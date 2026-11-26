@@ -8,7 +8,7 @@
 import { lstatSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const inject = ['systemPrompt']
+export const inject = ['systemPrompt', 'tools']
 
 const POWERSHELL_7_EXECUTABLES = new Set(['pwsh', 'pwsh.exe', 'pwsh-preview', 'pwsh-preview.exe'])
 
@@ -152,11 +152,15 @@ export function apply(ctx, config = {}) {
   const toolPwshOrder = ctx.systemPrompt.getSectionOrder('TOOL_PWSH')
   const order = Number.isFinite(toolPwshOrder) ? toolPwshOrder + 5 : 1015
 
+  // The pwsh tool is mounted per agent preset, so only the assembling scope can
+  // tell whether an agent actually has it; render nothing for agents without it.
+  const text = ({ scope }) => (ctx.tools.get('pwsh', scope) === undefined ? '' : guidance.text)
+
   ctx.effect(
     () => ctx.systemPrompt.section({
       name: 'guard:pwsh-windows-guard',
       order,
-      text: guidance.text,
+      text,
       interpolate: false,
     }),
     'pwsh-windows-guard.section()',

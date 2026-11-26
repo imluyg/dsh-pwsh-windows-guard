@@ -12,6 +12,7 @@
   - 执行策略默认 `Restricted`，直接跑 `.ps1` 通常被拒；
   - 原生命令非零退出不会抛异常，必须先看 `$LASTEXITCODE`。
 - 检测到 **PowerShell 7** 时，提示现代语法可用。
+- 提示段按 agent 惰性渲染：该 agent 的 preset 没有挂载 `pwsh` 工具时输出为空，没有 shell 的 agent 不消耗提示 token。
 - **非 Windows** 主机不做任何注入（直接返回，不注册提示段）。
 - Windows 沙箱的语言模式（`ConstrainedLanguage`）与管道 EPERM 边界说明由内置 `pwsh` 工具描述负责下发，本插件**不再重复**，以减小每轮提示体积。
 
@@ -19,7 +20,7 @@
 
 ## 要求
 
-- 带 `ctx.systemPrompt` 服务的 DSH，在 **0.2.2-rc.5** 上验证。
+- 带 `ctx.systemPrompt` 与 `ctx.tools` 服务的 DSH，在 **0.2.2-rc.5** 上验证。
 - Windows 主机（其它平台为 no-op）。
 - 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序：先检查默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`，再检查 `PATH` 中的 `pwsh.exe`，最后回退到 Windows PowerShell 5.1。若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不自动读取——请用本插件的 `pwshPath` 配置（或 `powerShellVersion`）对齐。
 

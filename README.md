@@ -12,6 +12,7 @@ A **DeepSeek Harness (DSH)** host-only bundle that detects the machine's Windows
   - execution policy defaults to `Restricted`, so a `.ps1` file is usually blocked;
   - native commands do not throw on a non-zero exit — check `$LASTEXITCODE`.
 - On **PowerShell 7** hosts, notes that modern syntax is available.
+- The section is rendered lazily per agent and stays empty when that agent's preset does not mount the `pwsh` tool, so shell-less agents pay no prompt tokens.
 - On **non-Windows** hosts it does nothing (returns without injecting).
 - The Windows sandbox language-mode and named-pipe EPERM notes are delivered by DSH's built-in `pwsh` tool description, so this plugin does **not** duplicate them — that keeps the per-request prompt smaller.
 
@@ -19,7 +20,7 @@ The plugin only shapes prompt text. It does **not** change how the `pwsh` tool e
 
 ## Requirements
 
-- DSH with the `ctx.systemPrompt` service. Tested against **DSH 0.2.2-rc.5**.
+- DSH with the `ctx.systemPrompt` and `ctx.tools` services. Tested against **DSH 0.2.2-rc.5**.
 - Windows host (the plugin is a no-op elsewhere).
 - The version detection mirrors `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5**'s executable resolution order: the default `%ProgramFiles%\PowerShell\7\pwsh.exe` location, then `pwsh.exe` entries on `PATH`, then Windows PowerShell 5.1. If the `pwsh` executor is configured with an explicit `pwshPath`, the plugin does not read it automatically — set this plugin's own `pwshPath` (or `powerShellVersion`) to match.
 

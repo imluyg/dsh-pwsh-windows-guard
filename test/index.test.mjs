@@ -6,16 +6,18 @@ import { join } from 'node:path'
 
 import { apply, candidateExists, detectPowerShell, inject, majorFromPath, ps51Text, ps7Text, resolveGuidance } from '../index.js'
 
-function fakeCtx(order = 1010) {
+function fakeCtx(order = 1010, hasPwsh = true) {
   const calls = []
   const orderLookups = []
   const effectLabels = []
+  const toolLookups = []
   const sections = new Map()
   const disposers = []
   return {
     calls,
     orderLookups,
     effectLabels,
+    toolLookups,
     sections,
     disposers,
     ctx: {
@@ -30,6 +32,12 @@ function fakeCtx(order = 1010) {
           return () => sections.delete(section.name)
         },
       },
+      tools: {
+        get: (name, scope) => {
+          toolLookups.push([name, scope])
+          return name === 'pwsh' && hasPwsh ? {} : undefined
+        },
+      },
       effect: (fn, label) => {
         effectLabels.push(label)
         const dispose = fn()
@@ -42,8 +50,8 @@ function fakeCtx(order = 1010) {
 
 const emptyWindowsEnv = { ProgramFiles: 'Z:\\nope', SystemRoot: 'Z:\\nope', PATH: '' }
 
-test('plugin declares the system prompt service dependency', () => {
-  assert.deepEqual(inject, ['systemPrompt'])
+test('plugin declares the system prompt and tools service dependencies', () => {
+  assert.deepEqual(inject, ['systemPrompt', 'tools'])
 })
 
 test('5.1 guidance is accurate in automatic and forced modes', () => {
@@ -285,27 +293,40 @@ test('null powerShellVersion keeps automatic detection', () => {
 })
 
 test('apply registers and disposes one section after TOOL_PWSH', { skip: process.platform !== 'win32' }, () => {
-  const { calls, orderLookups, effectLabels, sections, disposers, ctx } = fakeCtx(1010)
+  const { calls, orderLookups, effectLabels, toolLookups, sections, disposers, ctx } = fakeCtx(1010)
   apply(ctx, { powerShellVersion: 5 })
 
   assert.equal(calls.length, 1)
   assert.equal(calls[0].name, 'guard:pwsh-windows-guard')
   assert.equal(calls[0].order, 1015)
-  assert.equal(calls[0].text, ps51Text())
+  assert.equal(typeof calls[0].text, 'function')
   assert.equal(calls[0].interpolate, false)
   assert.deepEqual(orderLookups, ['TOOL_PWSH'])
   assert.deepEqual(effectLabels, ['pwsh-windows-guard.section()'])
+  assert.deepEqual(toolLookups, [])
   assert.equal(sections.size, 1)
+
+  assert.equal(calls[0].text({ scope: 'agent-a' }), ps51Text())
+  assert.deepEqual(toolLookups, [['pwsh', 'agent-a']])
 
   disposers[0]()
   assert.equal(sections.size, 0)
+})
+
+test('apply renders nothing when the pwsh tool is absent from the agent scope', { skip: process.platform !== 'win32' }, () => {
+  const { calls, toolLookups, sections, ctx } = fakeCtx(1010, false)
+  apply(ctx, { powerShellVersion: 5 })
+
+  assert.equal(sections.size, 1)
+  assert.equal(calls[0].text({ scope: 'agent-without-shell' }), '')
+  assert.deepEqual(toolLookups, [['pwsh', 'agent-without-shell']])
 })
 
 test('apply uses dynamic section order and the fixed fallback', { skip: process.platform !== 'win32' }, () => {
   const dynamic = fakeCtx(42)
   apply(dynamic.ctx, { powerShellVersion: 7 })
   assert.equal(dynamic.calls[0].order, 47)
-  assert.equal(dynamic.calls[0].text, ps7Text())
+  assert.equal(dynamic.calls[0].text({ scope: 'agent-a' }), ps7Text())
 
   const fallback = fakeCtx(Number.POSITIVE_INFINITY)
   apply(fallback.ctx, { powerShellVersion: 5 })
