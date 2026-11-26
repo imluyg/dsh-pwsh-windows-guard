@@ -21,7 +21,7 @@ The plugin only shapes prompt text. It does **not** change how the `pwsh` tool e
 
 - DSH with the `ctx.systemPrompt` service. Tested against **DSH 0.2.2-rc.5**.
 - Windows host (the plugin is a no-op elsewhere).
-- The version detection mirrors `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5**'s executable resolution order. If the `pwsh` executor is configured with an explicit `pwshPath`, the plugin does not follow it — use `powerShellVersion` to force the right guidance in that case.
+- The version detection mirrors `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5**'s executable resolution order: the default `%ProgramFiles%\PowerShell\7\pwsh.exe` location, then `pwsh.exe` entries on `PATH`, then Windows PowerShell 5.1. If the `pwsh` executor is configured with an explicit `pwshPath`, the plugin does not follow it — use `powerShellVersion` to force the right guidance in that case.
 
 ## Install
 
@@ -44,7 +44,7 @@ config:
   powerShellVersion: 5   # or 7; omit / null to auto-detect
 ```
 
-An invalid value (e.g. `"7"`, `8`) is rejected loudly at load time instead of silently falling back to auto-detection.
+A forced `5` or `7` skips executable detection; omitted or `null` values auto-detect. An invalid value (e.g. `"7"`, `8`) is rejected at load time on every platform, before the non-Windows no-op.
 
 ## Development
 
@@ -52,12 +52,12 @@ An invalid value (e.g. `"7"`, `8`) is rejected loudly at load time instead of si
 npm test
 ```
 
-Tests use the built-in `node:test` runner and are dependency-free. The Windows-only path is covered by CI on `windows-latest`; the pure guidance/detection functions are tested on any OS.
+Tests use the built-in `node:test` runner and are dependency-free. CI runs the full suite on Windows and Linux with Node 18 and 20; Windows-only injection tests are skipped on non-Windows runners.
 
 ## Limitations
 
 - Only changes the prompt shown to the model — it does **not** change how the `pwsh` tool executes.
-- Cannot make Windows PowerShell 5.1 understand PowerShell 7 syntax; install PowerShell 7 to unlock it (the tool auto-detects `C:\Program Files\PowerShell\7\pwsh.exe`).
+- Cannot make Windows PowerShell 5.1 understand PowerShell 7 syntax; install PowerShell 7 to unlock it (automatic detection checks the default install location and `PATH` unless a version is forced).
 - Version detection duplicates the upstream resolver rather than importing it (keeps the bundle dependency-free); see the pin notes above.
 
 ## License

@@ -21,7 +21,7 @@
 
 - 带 `ctx.systemPrompt` 服务的 DSH，在 **0.2.2-rc.5** 上验证。
 - Windows 主机（其它平台为 no-op）。
-- 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序；若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不会跟随——此时请用 `powerShellVersion` 手动指定。
+- 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序：先检查默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`，再检查 `PATH` 中的 `pwsh.exe`，最后回退到 Windows PowerShell 5.1。若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不会跟随——此时请用 `powerShellVersion` 手动指定。
 
 ## 安装
 
@@ -44,7 +44,7 @@ config:
   powerShellVersion: 5   # 或 7；省略 / null 则自动探测
 ```
 
-写成非法值（如 `"7"`、`8`）会在加载时直接报错，不再静默回退到自动探测。
+强制 `5` 或 `7` 时会跳过可执行文件探测；省略或 `null` 才自动探测。非法值（如 `"7"`、`8`）会在所有平台的加载阶段直接报错，先于非 Windows no-op 判断。
 
 ## 开发
 
@@ -52,12 +52,12 @@ config:
 npm test
 ```
 
-测试用内置 `node:test`，零依赖。Windows 专属路径由 `windows-latest` 的 CI 覆盖；纯函数（探测/文案）在任意平台都能测。
+测试用内置 `node:test`，零依赖。CI 在 Windows 与 Linux 上分别使用 Node 18、20 运行完整测试；非 Windows runner 会跳过仅 Windows 的注入测试。
 
 ## 限制
 
 - 只改提示，不改变工具执行方式；
-- 无法让 5.1 理解 PS7 专属语法，要彻底解锁需安装 PowerShell 7（工具会自动识别 `C:\Program Files\PowerShell\7\pwsh.exe`）；
+- 无法让 5.1 理解 PS7 专属语法，要彻底解锁需安装 PowerShell 7（自动探测会检查默认安装位置和 `PATH`，强制版本时除外）；
 - 版本探测复制上游解析逻辑而非直接 import（保持 bundle 零依赖），见上面的固定版本说明。
 
 ## 许可证

@@ -5,15 +5,14 @@
 //
 // Dependency-free by design: only Node built-ins, so it installs cleanly from a
 // local directory or from npm without pulling in extra packages.
-import { lstatSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const inject = ['systemPrompt']
 
 function exists(path) {
   try {
-    const stat = lstatSync(path)
-    return stat.isFile() || stat.isSymbolicLink()
+    return statSync(path).isFile()
   } catch {
     return false
   }
@@ -60,14 +59,14 @@ export function ps51Text() {
   return [
     '## PowerShell on this Windows host',
     '',
-    'The `pwsh` tool runs **Windows PowerShell 5.1** on this machine (no PowerShell 7 detected). Write PowerShell, not bash — native Windows paths and `$env:NAME` variables. These rules prevent the failures that otherwise look like the AI "breaking PowerShell":',
+    'The `pwsh` tool runs **Windows PowerShell 5.1** on this machine. Write PowerShell, not bash — native Windows paths and `$env:NAME` variables. These rules prevent the failures that otherwise look like the AI "breaking PowerShell":',
     '',
     '- **5.1 syntax only.** `??`, the ternary `a ? b : c`, and the chain operators `&&` / `||` do not exist in 5.1 and fail at parse time — the whole command never runs. Use `if`/`else`, `;`, and separate statements instead.',
     '- **Check native exit codes yourself.** A native program (git, node, cmd, …) exiting non-zero does not throw. Inspect `$LASTEXITCODE` (or `$?`) before assuming success.',
     '- **Execution policy defaults to Restricted.** Running a `.ps1` file is usually blocked; keep code inline in `-Command`, or invoke `powershell -ExecutionPolicy Bypass -File` (a Group Policy can still override it).',
     '- **Treat garbled errors as syntax errors.** Normal output is UTF-8, but a 5.1 parse error can print as mojibake such as `����λ��`. When you see that, suspect an unsupported construct (`??`, `&&`, ternary) and rewrite in 5.1 syntax instead of blaming the command.',
     '',
-    'Installing PowerShell 7 removes the syntax restriction; the tool auto-detects it at `C:\\Program Files\\PowerShell\\7\\pwsh.exe`.',
+    'PowerShell 7 supports these constructs; automatic detection checks the default install location and `PATH` unless a version is forced.',
   ].join('\n')
 }
 
@@ -93,12 +92,11 @@ export function resolveGuidance(config = {}, env = process.env, platform = proce
   const forced = config.powerShellVersion
   if (forced !== undefined && forced !== null && forced !== 5 && forced !== 7) {
     throw new Error(
-      `dsh-pwsh-windows-guard: invalid powerShellVersion ${JSON.stringify(forced)}; expected 5, 7, or omitted for auto-detect`,
+      `dsh-pwsh-windows-guard: invalid powerShellVersion ${JSON.stringify(forced)}; expected 5, 7, null, or omitted for auto-detect`,
     )
   }
   if (platform !== 'win32') return null
-  const detected = detectPowerShell(env, platform)
-  const major = forced === 5 || forced === 7 ? forced : detected.major
+  const major = forced === 5 || forced === 7 ? forced : detectPowerShell(env, platform).major
   return { major, text: major >= 7 ? ps7Text() : ps51Text() }
 }
 
