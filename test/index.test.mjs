@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { apply, detectPowerShell, inject, ps51Text, ps7Text, resolveGuidance } from '../index.js'
+import { apply, candidateExists, detectPowerShell, inject, majorFromPath, ps51Text, ps7Text, resolveGuidance } from '../index.js'
 
 function fakeCtx(order = 1010) {
   const calls = []
@@ -47,8 +47,9 @@ test('5.1 guidance is accurate in automatic and forced modes', () => {
   const text = ps51Text()
   assert.match(text, /Windows PowerShell 5\.1/)
   assert.match(text, /5\.1 syntax only/)
+  assert.match(text, /5\.1 equivalents/)
   assert.match(text, /Execution policy defaults to Restricted/)
-  assert.match(text, /automatic detection checks the default install location and `PATH`/)
+  assert.doesNotMatch(text, /automatic detection checks the default install location/)
   assert.doesNotMatch(text, /no PowerShell 7 detected/)
   assert.doesNotMatch(text, /Sandbox language mode/)
 })
@@ -56,6 +57,71 @@ test('5.1 guidance is accurate in automatic and forced modes', () => {
 test('PowerShell 7 guidance announces modern syntax', () => {
   assert.match(ps7Text(), /PowerShell 7/)
   assert.match(ps7Text(), /\?\?/)
+})
+
+test('candidateExists accepts a real file and rejects a directory', () => {
+  assert.equal(candidateExists('x', { statSync: () => ({ isFile: () => true }) }), true)
+  assert.equal(candidateExists('x', { statSync: () => ({ isFile: () => false }) }), false)
+})
+
+test('candidateExists rejects a missing candidate without falling back to lstat', () => {
+  let lstatCalled = false
+  const fs = {
+    statSync: () => {
+      const error = new Error('missing')
+      error.code = 'ENOENT'
+      throw error
+    },
+    lstatSync: () => {
+      lstatCalled = true
+      return { isSymbolicLink: () => true }
+    },
+  }
+  assert.equal(candidateExists('x', fs), false)
+  assert.equal(lstatCalled, false)
+})
+
+test('candidateExists accepts a Store-style alias (stat EACCES, lstat symlink)', () => {
+  const fs = {
+    statSync: () => {
+      const error = new Error('denied')
+      error.code = 'EACCES'
+      throw error
+    },
+    lstatSync: () => ({ isSymbolicLink: () => true }),
+  }
+  assert.equal(candidateExists('x', fs), true)
+})
+
+test('candidateExists rejects an EACCES path that is not a symlink', () => {
+  const fs = {
+    statSync: () => {
+      const error = new Error('denied')
+      error.code = 'EACCES'
+      throw error
+    },
+    lstatSync: () => ({ isSymbolicLink: () => false }),
+  }
+  assert.equal(candidateExists('x', fs), false)
+})
+
+test('majorFromPath maps executable names to a major version', () => {
+  assert.equal(majorFromPath('C:\\Program Files\\PowerShell\\7\\pwsh.exe'), 7)
+  assert.equal(majorFromPath('pwsh'), 7)
+  assert.equal(majorFromPath('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), 5)
+  assert.equal(majorFromPath('C:\\custom\\my-pwsh-tool.exe'), 5)
+})
+
+test('pwshPath config selects guidance and powerShellVersion wins over pwshPath', () => {
+  const noDetection = { ProgramFiles: 'Z:\\nope', SystemRoot: 'Z:\\nope', PATH: '' }
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' }, noDetection, 'win32').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' }, noDetection, 'win32').major, 5)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe', powerShellVersion: 5 }, noDetection, 'win32').major, 5)
+})
+
+test('invalid pwshPath is rejected', () => {
+  assert.throws(() => resolveGuidance({ pwshPath: 7 }, emptyWindowsEnv, 'win32'), /invalid pwshPath/)
+  assert.throws(() => resolveGuidance({ pwshPath: {} }, emptyWindowsEnv, 'linux'), /invalid pwshPath/)
 })
 
 test('detection falls back to the Windows PowerShell 5.1 path when no pwsh.exe exists', () => {

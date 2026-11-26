@@ -21,7 +21,7 @@ The plugin only shapes prompt text. It does **not** change how the `pwsh` tool e
 
 - DSH with the `ctx.systemPrompt` service. Tested against **DSH 0.2.2-rc.5**.
 - Windows host (the plugin is a no-op elsewhere).
-- The version detection mirrors `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5**'s executable resolution order: the default `%ProgramFiles%\PowerShell\7\pwsh.exe` location, then `pwsh.exe` entries on `PATH`, then Windows PowerShell 5.1. If the `pwsh` executor is configured with an explicit `pwshPath`, the plugin does not follow it — use `powerShellVersion` to force the right guidance in that case.
+- The version detection mirrors `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5**'s executable resolution order: the default `%ProgramFiles%\PowerShell\7\pwsh.exe` location, then `pwsh.exe` entries on `PATH`, then Windows PowerShell 5.1. If the `pwsh` executor is configured with an explicit `pwshPath`, the plugin does not read it automatically — set this plugin's own `pwshPath` (or `powerShellVersion`) to match.
 
 ## Install
 
@@ -37,14 +37,15 @@ Resolve the published package as a bundle dependency of your DSH profile, then e
 
 ## Configuration
 
-You can force a version in the bundle row's `config` (optional):
+Override detection from the bundle row's `config` (optional):
 
 ```yaml
 config:
-  powerShellVersion: 5   # or 7; omit / null to auto-detect
+  powerShellVersion: 5      # 5 or 7; omit / null to auto-detect
+  pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'   # optional; major version inferred from the name
 ```
 
-A forced `5` or `7` skips executable detection; omitted or `null` values auto-detect. An invalid value (e.g. `"7"`, `8`) is rejected at load time on every platform, before the non-Windows no-op.
+`powerShellVersion` (`5` or `7`) wins over everything. `pwshPath` mirrors an executor-level `pwshPath` override: the major version is inferred from the executable name (`pwsh.exe` → 7, `powershell.exe` → 5). With neither set, detection probes the default locations and `PATH`. Invalid values (e.g. `"7"`, `8`, or a non-string `pwshPath`) are rejected at load time on every platform, before the non-Windows no-op.
 
 ## Development
 
@@ -52,13 +53,15 @@ A forced `5` or `7` skips executable detection; omitted or `null` values auto-de
 npm test
 ```
 
-Tests use the built-in `node:test` runner and are dependency-free. CI runs the full suite on Windows and Linux with Node 18 and 20; Windows-only injection tests are skipped on non-Windows runners.
+Tests use the built-in `node:test` runner and are dependency-free. CI runs the full suite on Windows and Linux with Node 18, 20, 22, and 24; Windows-only injection tests are skipped on non-Windows runners.
 
 ## Limitations
 
 - Only changes the prompt shown to the model — it does **not** change how the `pwsh` tool executes.
 - Cannot make Windows PowerShell 5.1 understand PowerShell 7 syntax; install PowerShell 7 to unlock it (automatic detection checks the default install location and `PATH` unless a version is forced).
-- Version detection duplicates the upstream resolver rather than importing it (keeps the bundle dependency-free); see the pin notes above.
+- Version detection copies the upstream resolver rather than importing it (keeps the bundle dependency-free). The `dsh-pwsh-sandbox` executor delegates to `@deepseek-ai/dsh-pwsh-local`, so mirroring `dsh-pwsh-local` is the one definition that matters.
+- The copy uses a strict real-file check (`stat`) plus an EACCES-only `lstat` fallback for the Microsoft Store PowerShell 7 execution alias; upstream accepts any `lstat` symlink. A broken or directory symlink is still rejected here.
+- An executor-level `pwshPath` is not read automatically; mirror it with this plugin's `pwshPath` config (or force `powerShellVersion`).
 
 ## License
 

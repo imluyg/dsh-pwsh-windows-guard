@@ -21,7 +21,7 @@
 
 - 带 `ctx.systemPrompt` 服务的 DSH，在 **0.2.2-rc.5** 上验证。
 - Windows 主机（其它平台为 no-op）。
-- 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序：先检查默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`，再检查 `PATH` 中的 `pwsh.exe`，最后回退到 Windows PowerShell 5.1。若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不会跟随——此时请用 `powerShellVersion` 手动指定。
+- 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序：先检查默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`，再检查 `PATH` 中的 `pwsh.exe`，最后回退到 Windows PowerShell 5.1。若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不自动读取——请用本插件的 `pwshPath` 配置（或 `powerShellVersion`）对齐。
 
 ## 安装
 
@@ -37,14 +37,15 @@
 
 ## 配置
 
-可在 bundle 行的 `config` 里强制版本（可选）：
+可用 bundle 行的 `config` 覆盖探测（可选）：
 
 ```yaml
 config:
-  powerShellVersion: 5   # 或 7；省略 / null 则自动探测
+  powerShellVersion: 5      # 5 或 7；省略 / null 则自动探测
+  pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'   # 可选；按文件名推断主版本
 ```
 
-强制 `5` 或 `7` 时会跳过可执行文件探测；省略或 `null` 才自动探测。非法值（如 `"7"`、`8`）会在所有平台的加载阶段直接报错，先于非 Windows no-op 判断。
+`powerShellVersion`（`5` 或 `7`）优先级最高。`pwshPath` 用于对齐执行器级的 `pwshPath` 覆盖：按可执行文件名推断主版本（`pwsh.exe` → 7，`powershell.exe` → 5）。两者都不设时，探测默认安装位置与 `PATH`。非法值（如 `"7"`、`8`，或非字符串的 `pwshPath`）会在所有平台的加载阶段直接报错，先于非 Windows no-op 判断。
 
 ## 开发
 
@@ -52,13 +53,15 @@ config:
 npm test
 ```
 
-测试用内置 `node:test`，零依赖。CI 在 Windows 与 Linux 上分别使用 Node 18、20 运行完整测试；非 Windows runner 会跳过仅 Windows 的注入测试。
+测试用内置 `node:test`，零依赖。CI 在 Windows 与 Linux 上分别使用 Node 18、20、22、24 运行完整测试；非 Windows runner 会跳过仅 Windows 的注入测试。
 
 ## 限制
 
 - 只改提示，不改变工具执行方式；
 - 无法让 5.1 理解 PS7 专属语法，要彻底解锁需安装 PowerShell 7（自动探测会检查默认安装位置和 `PATH`，强制版本时除外）；
-- 版本探测复制上游解析逻辑而非直接 import（保持 bundle 零依赖），见上面的固定版本说明。
+- 版本探测复制上游解析逻辑而非直接 import（保持 bundle 零依赖）。`dsh-pwsh-sandbox` 执行器委托给 `@deepseek-ai/dsh-pwsh-local`，所以对齐 `dsh-pwsh-local` 就是唯一需要对齐的定义；
+- 复制版用严格真实文件检查（`stat`），仅对 EACCES 情况回退 `lstat` 识别 Microsoft Store 执行别名；失效/目录符号链接仍会被拒绝；
+- 执行器级的 `pwshPath` 不会被自动读取；请用本插件的 `pwshPath` 配置对齐（或强制 `powerShellVersion`）。
 
 ## 许可证
 
