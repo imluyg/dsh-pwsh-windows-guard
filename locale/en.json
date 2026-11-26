@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "PowerShell Windows guard",
+    "description": "Detects the active Windows PowerShell version (7 or 5.1) and adds host-specific rules to the system prompt so the agent avoids 5.1 syntax, exit-code, and execution-policy pitfalls."
+  }
+}

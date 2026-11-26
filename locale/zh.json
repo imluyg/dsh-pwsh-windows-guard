@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Windows PowerShell 兼容加固",
+    "description": "自动探测本机 Windows PowerShell 版本（7 或 5.1），并向系统提示注入本机专属规则，避免代理在 5.1 语法、退出码和执行策略上反复踩坑。"
+  }
+}

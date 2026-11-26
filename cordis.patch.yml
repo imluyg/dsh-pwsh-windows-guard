@@ -1,0 +1,4 @@
+- insert:
+    - id: pwsh-windows-guard
+      name: 'dsh-pwsh-windows-guard'
+      config: {}

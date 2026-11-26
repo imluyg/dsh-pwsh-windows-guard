@@ -1,0 +1,50 @@
+{
+  "name": "dsh-pwsh-windows-guard",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DSH host plugin that detects the active Windows PowerShell version (7 or 5.1) and injects host-specific rules into the system prompt so the agent avoids 5.1 syntax, exit-code, and execution-policy pitfalls.",
+  "license": "MIT",
+  "author": "imluyg <imluyg@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imluyg/dsh-pwsh-windows-guard.git"
+  },
+  "homepage": "https://github.com/imluyg/dsh-pwsh-windows-guard#readme",
+  "bugs": {
+    "url": "https://github.com/imluyg/dsh-pwsh-windows-guard/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "powershell",
+    "windows",
+    "system-prompt",
+    "agent"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
