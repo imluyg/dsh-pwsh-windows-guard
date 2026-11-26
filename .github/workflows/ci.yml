@@ -17,7 +17,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Syntax check
-        run: node --check index.js
+        run: |
+          node --check index.js
+          node --check test/index.test.mjs
       - name: Verify package contents
         run: npm pack --dry-run
       - name: Run tests

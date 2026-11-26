@@ -45,7 +45,7 @@ config:
   pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'   # optional; major version inferred from the name
 ```
 
-`powerShellVersion` (`5` or `7`) wins over everything. `pwshPath` mirrors an executor-level `pwshPath` override: the major version is inferred from the executable name (`pwsh.exe` → 7, `powershell.exe` → 5). With neither set, detection probes the default locations and `PATH`. Invalid values (e.g. `"7"`, `8`, or a non-string `pwshPath`) are rejected at load time on every platform, before the non-Windows no-op.
+`powerShellVersion` (`5` or `7`) wins over everything. `pwshPath` mirrors an executor-level `pwshPath` override: the major version is inferred from the executable name (`pwsh.exe` / `pwsh-preview.exe` → 7, `powershell.exe` → 5), and a blank value is treated as unset. With neither set, detection probes the default locations and `PATH`. Invalid values (e.g. `"7"`, `8`, or a non-string `pwshPath`) are rejected at load time on every platform, before the non-Windows no-op.
 
 ## Development
 
@@ -60,7 +60,7 @@ Tests use the built-in `node:test` runner and are dependency-free. CI runs the f
 - Only changes the prompt shown to the model — it does **not** change how the `pwsh` tool executes.
 - Cannot make Windows PowerShell 5.1 understand PowerShell 7 syntax; install PowerShell 7 to unlock it (automatic detection checks the default install location and `PATH` unless a version is forced).
 - Version detection copies the upstream resolver rather than importing it (keeps the bundle dependency-free). The `dsh-pwsh-sandbox` executor delegates to `@deepseek-ai/dsh-pwsh-local`, so mirroring `dsh-pwsh-local` is the one definition that matters.
-- The copy uses a strict real-file check (`stat`) plus an EACCES-only `lstat` fallback for the Microsoft Store PowerShell 7 execution alias; upstream accepts any `lstat` symlink. A broken or directory symlink is still rejected here.
+- Existence detection uses the same `lstat` rule as upstream: a real file or any symlink counts. A dangling link or a link to a directory therefore also reports PowerShell 7, since upstream picks it too and the spawn itself then fails.
 - An executor-level `pwshPath` is not read automatically; mirror it with this plugin's `pwshPath` config (or force `powerShellVersion`).
 
 ## License

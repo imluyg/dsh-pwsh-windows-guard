@@ -5,33 +5,28 @@
 //
 // Dependency-free by design: only Node built-ins, so it installs cleanly from a
 // local directory or from npm without pulling in extra packages.
-import { statSync, lstatSync } from 'node:fs'
+import { lstatSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const inject = ['systemPrompt']
 
+const POWERSHELL_7_EXECUTABLES = new Set(['pwsh', 'pwsh.exe', 'pwsh-preview', 'pwsh-preview.exe'])
+
 /**
- * Whether a candidate can be spawned. Follows a real file, and — matching the
- * upstream resolver — accepts a Microsoft Store execution alias: `stat` follows
- * the reparse point and fails with EACCES on the target's ACL, while `lstat`
- * sees the alias itself as a symlink. Unlike upstream we only take the symlink
- * path for EACCES, so a broken (ENOENT) or directory symlink is still rejected.
+ * Whether a candidate counts as available, using the same rule as the upstream
+ * resolver: `lstat` and accept a real file or a symlink. A dangling link or a
+ * link to a directory therefore also counts — upstream would pick it too and
+ * let the spawn fail.
  *
  * @param {string} candidate
- * @param {{ statSync: Function, lstatSync: Function }} [fs]
+ * @param {{ lstatSync: Function }} [fs]
  * @returns {boolean}
  */
-export function candidateExists(candidate, fs = { statSync, lstatSync }) {
+export function candidateExists(candidate, fs = { lstatSync }) {
   try {
-    return fs.statSync(candidate).isFile()
-  } catch (error) {
-    if (error && error.code === 'EACCES') {
-      try {
-        return fs.lstatSync(candidate).isSymbolicLink()
-      } catch {
-        return false
-      }
-    }
+    const stat = fs.lstatSync(candidate)
+    return stat.isFile() || stat.isSymbolicLink()
+  } catch {
     return false
   }
 }
@@ -104,14 +99,15 @@ export function ps7Text() {
 /**
  * Infer the PowerShell major version from an explicit executable path, so a
  * configured `pwshPath` (the executor's override) yields matching guidance.
- * `powershell.exe` is Windows PowerShell 5.1; `pwsh` / `pwsh.exe` is PowerShell 7.
+ * `powershell.exe` is Windows PowerShell 5.1; `pwsh`, `pwsh.exe`, and the
+ * preview binaries `pwsh-preview` / `pwsh-preview.exe` are PowerShell 7.
  *
  * @param {string} path
  * @returns {5 | 7}
  */
 export function majorFromPath(path) {
-  const base = String(path).trim().split(/[\\/]/).pop().toLowerCase()
-  return base === 'pwsh' || base === 'pwsh.exe' ? 7 : 5
+  const base = String(path).trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase()
+  return POWERSHELL_7_EXECUTABLES.has(base) ? 7 : 5
 }
 
 /**
@@ -136,12 +132,13 @@ export function resolveGuidance(config = {}, env = process.env, platform = proce
       `dsh-pwsh-windows-guard: invalid pwshPath ${JSON.stringify(declared)}; expected a string, null, or omitted`,
     )
   }
+  const declaredPath = typeof declared === 'string' ? declared.trim() : ''
   if (platform !== 'win32') return null
   const major =
     forced === 5 || forced === 7
       ? forced
-      : declared !== undefined && declared !== null && declared.length > 0
-        ? majorFromPath(declared)
+      : declaredPath.length > 0
+        ? majorFromPath(declaredPath)
         : detectPowerShell(env, platform).major
   return { major, text: major >= 7 ? ps7Text() : ps51Text() }
 }
@@ -155,10 +152,13 @@ export function apply(ctx, config = {}) {
   const toolPwshOrder = ctx.systemPrompt.getSectionOrder('TOOL_PWSH')
   const order = Number.isFinite(toolPwshOrder) ? toolPwshOrder + 5 : 1015
 
-  ctx.effect(() => ctx.systemPrompt.section({
-    name: 'guard:pwsh-windows-guard',
-    order,
-    text: guidance.text,
-    interpolate: false,
-  }))
+  ctx.effect(
+    () => ctx.systemPrompt.section({
+      name: 'guard:pwsh-windows-guard',
+      order,
+      text: guidance.text,
+      interpolate: false,
+    }),
+    'pwsh-windows-guard.section()',
+  )
 }

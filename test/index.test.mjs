@@ -9,11 +9,13 @@ import { apply, candidateExists, detectPowerShell, inject, majorFromPath, ps51Te
 function fakeCtx(order = 1010) {
   const calls = []
   const orderLookups = []
+  const effectLabels = []
   const sections = new Map()
   const disposers = []
   return {
     calls,
     orderLookups,
+    effectLabels,
     sections,
     disposers,
     ctx: {
@@ -28,7 +30,8 @@ function fakeCtx(order = 1010) {
           return () => sections.delete(section.name)
         },
       },
-      effect: (fn) => {
+      effect: (fn, label) => {
+        effectLabels.push(label)
         const dispose = fn()
         disposers.push(dispose)
         return dispose
@@ -59,48 +62,20 @@ test('PowerShell 7 guidance announces modern syntax', () => {
   assert.match(ps7Text(), /\?\?/)
 })
 
-test('candidateExists accepts a real file and rejects a directory', () => {
-  assert.equal(candidateExists('x', { statSync: () => ({ isFile: () => true }) }), true)
-  assert.equal(candidateExists('x', { statSync: () => ({ isFile: () => false }) }), false)
+test('candidateExists accepts a real file and a symlink, rejects a plain directory', () => {
+  const entry = (file, link) => ({ isFile: () => file, isSymbolicLink: () => link })
+  assert.equal(candidateExists('x', { lstatSync: () => entry(true, false) }), true)
+  assert.equal(candidateExists('x', { lstatSync: () => entry(false, true) }), true)
+  assert.equal(candidateExists('x', { lstatSync: () => entry(false, false) }), false)
 })
 
-test('candidateExists rejects a missing candidate without falling back to lstat', () => {
-  let lstatCalled = false
+test('candidateExists treats an lstat error as absent', () => {
   const fs = {
-    statSync: () => {
+    lstatSync: () => {
       const error = new Error('missing')
       error.code = 'ENOENT'
       throw error
     },
-    lstatSync: () => {
-      lstatCalled = true
-      return { isSymbolicLink: () => true }
-    },
-  }
-  assert.equal(candidateExists('x', fs), false)
-  assert.equal(lstatCalled, false)
-})
-
-test('candidateExists accepts a Store-style alias (stat EACCES, lstat symlink)', () => {
-  const fs = {
-    statSync: () => {
-      const error = new Error('denied')
-      error.code = 'EACCES'
-      throw error
-    },
-    lstatSync: () => ({ isSymbolicLink: () => true }),
-  }
-  assert.equal(candidateExists('x', fs), true)
-})
-
-test('candidateExists rejects an EACCES path that is not a symlink', () => {
-  const fs = {
-    statSync: () => {
-      const error = new Error('denied')
-      error.code = 'EACCES'
-      throw error
-    },
-    lstatSync: () => ({ isSymbolicLink: () => false }),
   }
   assert.equal(candidateExists('x', fs), false)
 })
@@ -108,6 +83,9 @@ test('candidateExists rejects an EACCES path that is not a symlink', () => {
 test('majorFromPath maps executable names to a major version', () => {
   assert.equal(majorFromPath('C:\\Program Files\\PowerShell\\7\\pwsh.exe'), 7)
   assert.equal(majorFromPath('pwsh'), 7)
+  assert.equal(majorFromPath('C:\\Program Files\\PowerShell\\7-preview\\pwsh-preview.exe'), 7)
+  assert.equal(majorFromPath('pwsh-preview'), 7)
+  assert.equal(majorFromPath('C:\\Program Files\\PowerShell\\7\\pwsh.exe\\'), 7)
   assert.equal(majorFromPath('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), 5)
   assert.equal(majorFromPath('C:\\custom\\my-pwsh-tool.exe'), 5)
 })
@@ -115,8 +93,24 @@ test('majorFromPath maps executable names to a major version', () => {
 test('pwshPath config selects guidance and powerShellVersion wins over pwshPath', () => {
   const noDetection = { ProgramFiles: 'Z:\\nope', SystemRoot: 'Z:\\nope', PATH: '' }
   assert.equal(resolveGuidance({ pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' }, noDetection, 'win32').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\Program Files\\PowerShell\\7-preview\\pwsh-preview.exe' }, noDetection, 'win32').major, 7)
   assert.equal(resolveGuidance({ pwshPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' }, noDetection, 'win32').major, 5)
   assert.equal(resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe', powerShellVersion: 5 }, noDetection, 'win32').major, 5)
+})
+
+test('pwshPath is trimmed and a blank value falls back to automatic detection', (t) => {
+  const noDetection = { ProgramFiles: 'Z:\\nope', SystemRoot: 'Z:\\nope', PATH: '' }
+  assert.equal(resolveGuidance({ pwshPath: ' C:\\x\\pwsh-preview.exe ' }, noDetection, 'win32').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: '' }, noDetection, 'win32').major, 5)
+
+  const root = mkdtempSync(join(tmpdir(), 'pwg-blank-path-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  mkdirSync(join(root, 'PowerShell', '7'), { recursive: true })
+  writeFileSync(join(root, 'PowerShell', '7', 'pwsh.exe'), '')
+  const ps7Env = { ProgramFiles: root, SystemRoot: root, PATH: '' }
+
+  assert.equal(resolveGuidance({ pwshPath: '' }, ps7Env, 'win32').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: '   ' }, ps7Env, 'win32').major, 7)
 })
 
 test('invalid pwshPath is rejected', () => {
@@ -204,7 +198,7 @@ test('a directory named pwsh.exe is not treated as PowerShell 7', (t) => {
   assert.equal(detectPowerShell({ ProgramFiles: root, SystemRoot: root, PATH: '' }, 'win32').major, 5)
 })
 
-test('detection follows file symlinks but rejects broken and directory symlinks', (t) => {
+test('detection accepts any lstat symlink, like upstream', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'pwg-symlink-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const programFiles = join(root, 'program-files')
@@ -227,13 +221,14 @@ test('detection follows file symlinks but rejects broken and directory symlinks'
     path: executable,
   })
 
+  // Upstream lstat accepts these too; the real failure is the spawn, not the detection.
   rmSync(executable)
   symlinkSync(join(root, 'missing.exe'), executable)
-  assert.equal(detectPowerShell({ ProgramFiles: programFiles, SystemRoot: root, PATH: '' }, 'win32').major, 5)
+  assert.equal(detectPowerShell({ ProgramFiles: programFiles, SystemRoot: root, PATH: '' }, 'win32').major, 7)
 
   rmSync(executable)
   symlinkSync(targetDirectory, executable, process.platform === 'win32' ? 'junction' : 'dir')
-  assert.equal(detectPowerShell({ ProgramFiles: programFiles, SystemRoot: root, PATH: '' }, 'win32').major, 5)
+  assert.equal(detectPowerShell({ ProgramFiles: programFiles, SystemRoot: root, PATH: '' }, 'win32').major, 7)
 })
 
 test('non-Windows detection returns no PowerShell version or path', () => {
@@ -290,7 +285,7 @@ test('null powerShellVersion keeps automatic detection', () => {
 })
 
 test('apply registers and disposes one section after TOOL_PWSH', { skip: process.platform !== 'win32' }, () => {
-  const { calls, orderLookups, sections, disposers, ctx } = fakeCtx(1010)
+  const { calls, orderLookups, effectLabels, sections, disposers, ctx } = fakeCtx(1010)
   apply(ctx, { powerShellVersion: 5 })
 
   assert.equal(calls.length, 1)
@@ -299,6 +294,7 @@ test('apply registers and disposes one section after TOOL_PWSH', { skip: process
   assert.equal(calls[0].text, ps51Text())
   assert.equal(calls[0].interpolate, false)
   assert.deepEqual(orderLookups, ['TOOL_PWSH'])
+  assert.deepEqual(effectLabels, ['pwsh-windows-guard.section()'])
   assert.equal(sections.size, 1)
 
   disposers[0]()
