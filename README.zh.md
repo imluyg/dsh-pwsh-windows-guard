@@ -10,6 +10,7 @@
   - 5.1 不支持 `??`、三元 `a ? b : c`、`&&` / `||`（写了整段解析失败）；
   - 5.1 的解析错误中文会乱码（`����λ��`）——当语法问题处理，别当成外部故障；
   - 执行策略默认 `Restricted`，直接跑 `.ps1` 通常被拒；
+  - `curl`/`wget` 是 `Invoke-WebRequest` 的别名（要用真 curl 得写 `curl.exe`），`-AsHashtable`、`-Parallel` 这类 PS7 专属参数在 5.1 不存在；
   - 原生命令非零退出不会抛异常，必须先看 `$LASTEXITCODE`。
 - 检测到 **PowerShell 7** 时，提示现代语法可用。
 - 提示段按 agent 惰性渲染：该 agent 的 preset 没有挂载 `pwsh` 工具时输出为空，没有 shell 的 agent 不消耗提示 token。
@@ -22,7 +23,7 @@
 
 - 带 `ctx.systemPrompt` 与 `ctx.tools` 服务的 DSH，在 **0.2.2-rc.5** 上验证。
 - Windows 主机（其它平台为 no-op）。
-- 版本探测复制了 `@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 的可执行文件解析顺序：先检查默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`，再检查 `PATH` 中的 `pwsh.exe`，最后回退到 Windows PowerShell 5.1。若 `pwsh` 执行器用 `pwshPath` 强制指定了别的可执行文件，本插件不自动读取——请用本插件的 `pwshPath` 配置（或 `powerShellVersion`）对齐。
+- 插件在渲染时从 `shell` 服务读取执行器实际解析出的路径（`ctx.get('shell').pwshPath`，`@deepseek-ai/dsh-pwsh-local` **0.2.2-rc.5** 已暴露，沙箱执行器继承），因此执行器级的 `pwshPath` 会被自动跟随。不暴露 `pwshPath` 的执行器则回退到本插件的 `pwshPath`，再回退到自动探测；探测镜像同一包的解析顺序：默认 `%ProgramFiles%\PowerShell\7\pwsh.exe`、`PATH` 中的 `pwsh.exe`、最后 Windows PowerShell 5.1。
 
 ## 安装
 
@@ -46,7 +47,7 @@ config:
   pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'   # 可选；按文件名推断主版本
 ```
 
-`powerShellVersion`（`5` 或 `7`）优先级最高。`pwshPath` 用于对齐执行器级的 `pwshPath` 覆盖：按可执行文件名推断主版本（`pwsh.exe` / `pwsh-preview.exe` → 7，`powershell.exe` → 5），空白值视为未设置。两者都不设时，探测默认安装位置与 `PATH`。非法值（如 `"7"`、`8`，或非字符串的 `pwshPath`）会在所有平台的加载阶段直接报错，先于非 Windows no-op 判断。
+`powerShellVersion`（`5` 或 `7`）优先级最高。优先级顺序：`powerShellVersion` > 执行器解析出的 `pwshPath` > 本插件的 `pwshPath` > 自动探测。本插件的 `pwshPath` 是不暴露该路径的执行器所用回退：按可执行文件名推断主版本（`pwsh.exe` / `pwsh-preview.exe` → 7，`powershell.exe` → 5），空白值视为未设置；执行器给出的可执行文件名无法识别时会被跳过，而不会强判为 5.1。三者都没有时，探测默认安装位置与 `PATH`。非法值（如 `"7"`、`8`，或非字符串的 `pwshPath`）会在所有平台的加载阶段直接报错，先于非 Windows no-op 判断。
 
 ## 开发
 
@@ -60,9 +61,9 @@ npm test
 
 - 只改提示，不改变工具执行方式；
 - 无法让 5.1 理解 PS7 专属语法，要彻底解锁需安装 PowerShell 7（自动探测会检查默认安装位置和 `PATH`，强制版本时除外）；
-- 版本探测复制上游解析逻辑而非直接 import（保持 bundle 零依赖）。`dsh-pwsh-sandbox` 执行器委托给 `@deepseek-ai/dsh-pwsh-local`，所以对齐 `dsh-pwsh-local` 就是唯一需要对齐的定义；
+- 版本探测复制上游解析逻辑而非直接 import（保持 bundle 零依赖）；执行器的 `pwshPath` 可用时优先使用它。`dsh-pwsh-sandbox` 执行器委托给 `@deepseek-ai/dsh-pwsh-local`，所以镜像 `dsh-pwsh-local` 仍是回退路径唯一需要对齐的定义；
 - 存在性判定与上游相同的 `lstat` 规则：真实文件或任意符号链接都算存在。因此失效链接、指向目录的链接也会报 PowerShell 7——上游同样会选中它们，真正的失败发生在 spawn 阶段；
-- 执行器级的 `pwshPath` 不会被自动读取；请用本插件的 `pwshPath` 配置对齐（或强制 `powerShellVersion`）。
+- 不暴露 `pwshPath` 的执行器无法自动对齐；请用本插件的 `pwshPath` 配置或 `powerShellVersion`。
 
 ## 许可证
 

@@ -6,11 +6,12 @@ import { join } from 'node:path'
 
 import { apply, candidateExists, detectPowerShell, inject, majorFromPath, ps51Text, ps7Text, resolveGuidance } from '../index.js'
 
-function fakeCtx(order = 1010, hasPwsh = true) {
+function fakeCtx(order = 1010, hasPwsh = true, shell = undefined) {
   const calls = []
   const orderLookups = []
   const effectLabels = []
   const toolLookups = []
+  const shellLookups = []
   const sections = new Map()
   const disposers = []
   return {
@@ -18,9 +19,15 @@ function fakeCtx(order = 1010, hasPwsh = true) {
     orderLookups,
     effectLabels,
     toolLookups,
+    shellLookups,
     sections,
     disposers,
     ctx: {
+      get: (name) => {
+        shellLookups.push(name)
+        if (name !== 'shell') return undefined
+        return typeof shell === 'function' ? shell() : shell
+      },
       systemPrompt: {
         getSectionOrder: (name) => {
           orderLookups.push(name)
@@ -49,6 +56,8 @@ function fakeCtx(order = 1010, hasPwsh = true) {
 }
 
 const emptyWindowsEnv = { ProgramFiles: 'Z:\\nope', SystemRoot: 'Z:\\nope', PATH: '' }
+const PS51_PATH = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+const PS7_PATH = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
 
 test('plugin declares the system prompt and tools service dependencies', () => {
   assert.deepEqual(inject, ['systemPrompt', 'tools'])
@@ -65,9 +74,17 @@ test('5.1 guidance is accurate in automatic and forced modes', () => {
   assert.doesNotMatch(text, /Sandbox language mode/)
 })
 
-test('PowerShell 7 guidance announces modern syntax', () => {
-  assert.match(ps7Text(), /PowerShell 7/)
-  assert.match(ps7Text(), /\?\?/)
+test('5.1 guidance covers the verified 5.1 pitfalls and stays compact', () => {
+  const text = ps51Text()
+  assert.match(text, /curl\.exe/)
+  assert.match(text, /wget/)
+  assert.match(text, /Invoke-RestMethod/)
+  assert.match(text, /-AsHashtable/)
+  assert.match(text, /-Parallel/)
+  assert.match(text, /-AdditionalChildPath/)
+  assert.match(text, /Test-Json/)
+  assert.match(text, /-SkipCertificateCheck/)
+  assert.ok(text.length < 1800, `5.1 guidance grew to ${text.length} characters`)
 })
 
 test('candidateExists accepts a real file and a symlink, rejects a plain directory', () => {
@@ -292,6 +309,63 @@ test('null powerShellVersion keeps automatic detection', () => {
   assert.equal(resolveGuidance({ powerShellVersion: null }, emptyWindowsEnv, 'win32').major, 5)
 })
 
+test('executor path selects guidance and beats the plugin pwshPath', () => {
+  assert.equal(resolveGuidance({}, emptyWindowsEnv, 'win32', 'C:\\x\\pwsh.exe').major, 7)
+  assert.equal(resolveGuidance({}, emptyWindowsEnv, 'win32', 'C:\\x\\powershell.exe').major, 5)
+  assert.equal(
+    resolveGuidance({ pwshPath: 'C:\\x\\powershell.exe' }, emptyWindowsEnv, 'win32', 'C:\\x\\pwsh.exe').major,
+    7,
+  )
+  assert.equal(
+    resolveGuidance(
+      { pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+      emptyWindowsEnv,
+      'win32',
+      'C:\\x\\powershell.exe',
+    ).major,
+    5,
+  )
+})
+
+test('executor path is trimmed, and blank or non-string values are ignored', () => {
+  assert.equal(resolveGuidance({}, emptyWindowsEnv, 'win32', '  C:\\x\\pwsh.exe  ').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe' }, emptyWindowsEnv, 'win32', '   ').major, 7)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe' }, emptyWindowsEnv, 'win32', undefined).major, 7)
+  assert.equal(resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe' }, emptyWindowsEnv, 'win32', 7).major, 7)
+  assert.equal(resolveGuidance({}, emptyWindowsEnv, 'win32', null).major, 5)
+})
+
+test('an unrecognized executor name falls through to config or detection', (t) => {
+  assert.equal(
+    resolveGuidance({ pwshPath: 'C:\\x\\pwsh.exe' }, emptyWindowsEnv, 'win32', 'C:\\tools\\my-shell.exe').major,
+    7,
+  )
+  assert.equal(resolveGuidance({}, emptyWindowsEnv, 'win32', 'C:\\tools\\my-shell.exe').major, 5)
+
+  const root = mkdtempSync(join(tmpdir(), 'pwg-unknown-executor-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  mkdirSync(join(root, 'PowerShell', '7'), { recursive: true })
+  writeFileSync(join(root, 'PowerShell', '7', 'pwsh.exe'), '')
+  const ps7Env = { ProgramFiles: root, SystemRoot: root, PATH: '' }
+
+  assert.equal(resolveGuidance({}, ps7Env, 'win32', 'C:\\tools\\my-shell.exe').major, 7)
+})
+
+test('forced powerShellVersion wins over the executor path without reading env', () => {
+  const env = new Proxy({}, {
+    get() {
+      throw new Error('forced versions must not read the detection environment')
+    },
+  })
+
+  assert.equal(resolveGuidance({ powerShellVersion: 5 }, env, 'win32', 'C:\\x\\pwsh.exe').major, 5)
+  assert.equal(resolveGuidance({ powerShellVersion: 7 }, env, 'win32', 'C:\\x\\powershell.exe').major, 7)
+})
+
+test('non-Windows hosts produce no guidance even with an executor path', () => {
+  assert.equal(resolveGuidance({}, {}, 'linux', 'C:\\x\\pwsh.exe'), null)
+})
+
 test('apply registers and disposes one section after TOOL_PWSH', { skip: process.platform !== 'win32' }, () => {
   const { calls, orderLookups, effectLabels, toolLookups, sections, disposers, ctx } = fakeCtx(1010)
   apply(ctx, { powerShellVersion: 5 })
@@ -340,4 +414,72 @@ test('apply is a no-op on non-Windows hosts', { skip: process.platform === 'win3
   assert.equal(calls.length, 0)
   assert.equal(sections.size, 0)
   assert.equal(disposers.length, 0)
+})
+
+test('apply reads the shell service only when rendering', { skip: process.platform !== 'win32' }, () => {
+  const { calls, shellLookups, ctx } = fakeCtx(1010, true, { pwshPath: PS7_PATH })
+  apply(ctx, { pwshPath: PS51_PATH })
+
+  assert.deepEqual(shellLookups, [])
+  assert.equal(calls[0].text({ scope: 'agent-a' }), ps7Text())
+  assert.deepEqual(shellLookups, ['shell'])
+})
+
+test('apply renders the executor version over the plugin pwshPath in both directions', { skip: process.platform !== 'win32' }, () => {
+  const seven = fakeCtx(1010, true, { pwshPath: PS7_PATH })
+  apply(seven.ctx, { pwshPath: PS51_PATH })
+  assert.equal(seven.calls[0].text({ scope: 'agent-a' }), ps7Text())
+
+  const five = fakeCtx(1010, true, { pwshPath: PS51_PATH })
+  apply(five.ctx, { pwshPath: PS7_PATH })
+  assert.equal(five.calls[0].text({ scope: 'agent-a' }), ps51Text())
+})
+
+test('apply follows executor path changes between renders', { skip: process.platform !== 'win32' }, () => {
+  const shell = { pwshPath: PS51_PATH }
+  const { calls, ctx } = fakeCtx(1010, true, shell)
+  apply(ctx, { pwshPath: PS7_PATH })
+
+  assert.equal(calls[0].text({ scope: 'agent-a' }), ps51Text())
+  shell.pwshPath = PS7_PATH
+  assert.equal(calls[0].text({ scope: 'agent-a' }), ps7Text())
+})
+
+test('apply falls back when the shell service is absent, blank, malformed, or throws', { skip: process.platform !== 'win32' }, () => {
+  const shells = [
+    undefined,
+    {},
+    { pwshPath: '   ' },
+    { pwshPath: 7 },
+    () => {
+      throw new Error('shell unavailable')
+    },
+    {
+      get pwshPath() {
+        throw new Error('pwshPath unavailable')
+      },
+    },
+  ]
+
+  for (const shell of shells) {
+    const fixture = fakeCtx(1010, true, shell)
+    apply(fixture.ctx, { pwshPath: PS7_PATH })
+    assert.equal(fixture.calls[0].text({ scope: 'agent-a' }), ps7Text())
+  }
+})
+
+test('apply keeps a forced version even when the executor disagrees', { skip: process.platform !== 'win32' }, () => {
+  const { calls, shellLookups, ctx } = fakeCtx(1010, true, { pwshPath: PS7_PATH })
+  apply(ctx, { powerShellVersion: 5 })
+
+  assert.equal(calls[0].text({ scope: 'agent-a' }), ps51Text())
+  assert.deepEqual(shellLookups, [])
+})
+
+test('apply does not read the shell for agents without the pwsh tool', { skip: process.platform !== 'win32' }, () => {
+  const { calls, shellLookups, ctx } = fakeCtx(1010, false, { pwshPath: PS7_PATH })
+  apply(ctx, { pwshPath: PS51_PATH })
+
+  assert.equal(calls[0].text({ scope: 'agent-without-shell' }), '')
+  assert.deepEqual(shellLookups, [])
 })
